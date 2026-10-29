@@ -21,8 +21,8 @@ jobs:
         run: bun run build:chrome
       - name: Package unpacked Chrome extension
         run: |
-          test -f .output/chrome-mv3/manifest.json
-          cd .output/chrome-mv3
+          test -f build/chrome-mv3/manifest.json
+          cd build/chrome-mv3
           zip -r "$GITHUB_WORKSPACE/page-assist-chrome-ollama-fix.zip" .
       - name: Upload Chrome extension ZIP
         uses: actions/upload-artifact@v4
