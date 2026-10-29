@@ -353,38 +353,30 @@ export class ChatOllama
                 )
             )
             for await (const chunk of stream) {
-                if (!chunk.done) {
-                    const responseMessage = chunk.message
-
-                    // Build tool_call_chunks if Ollama returned tool calls
-                    const toolCallChunks = responseMessage.tool_calls?.map(
-                        (tc, i) => ({
-                            name: tc.function.name,
-                            args: JSON.stringify(tc.function.arguments),
-                            type: "tool_call_chunk" as const,
-                            index: i,
-                            id: crypto.randomUUID(),
-                        })
-                    )
-
-                    const content = responseMessage.content ?? ""
-
-                    yield new ChatGenerationChunk({
-                        text: content,
-                        message: new AIMessageChunk({
-                            content,
-                            additional_kwargs: responseMessage?.thinking
-                                ? { reasoning_content: responseMessage.thinking }
-                                : {},
-                            tool_call_chunks: toolCallChunks,
-                        }),
+                // Ollama may return tool calls in the final (done: true) chunk.
+                const responseMessage = chunk.message
+                const toolCallChunks = responseMessage?.tool_calls?.map(
+                    (tc, i) => ({
+                        name: tc.function.name,
+                        args: JSON.stringify(tc.function.arguments),
+                        type: "tool_call_chunk" as const,
+                        index: i,
+                        id: crypto.randomUUID(),
                     })
-                    await runManager?.handleLLMNewToken(content)
-                } else {
-                    yield new ChatGenerationChunk({
-                        text: "",
-                        message: new AIMessageChunk({ content: "" }),
-                        generationInfo: {
+                )
+                const content = responseMessage?.content ?? ""
+
+                yield new ChatGenerationChunk({
+                    text: content,
+                    message: new AIMessageChunk({
+                        content,
+                        additional_kwargs: responseMessage?.thinking
+                            ? { reasoning_content: responseMessage.thinking }
+                            : {},
+                        tool_call_chunks: toolCallChunks,
+                    }),
+                    generationInfo: chunk.done
+                        ? {
                             model: chunk.model,
                             total_duration: chunk.total_duration,
                             load_duration: chunk.load_duration,
@@ -392,8 +384,11 @@ export class ChatOllama
                             prompt_eval_duration: chunk.prompt_eval_duration,
                             eval_count: chunk.eval_count,
                             eval_duration: chunk.eval_duration,
-                        },
-                    })
+                        }
+                        : undefined,
+                })
+                if (content) {
+                    await runManager?.handleLLMNewToken(content)
                 }
             }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
