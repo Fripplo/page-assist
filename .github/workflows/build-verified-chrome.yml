@@ -1,0 +1,31 @@
+name: Build Chrome with file verification
+on:
+  push:
+    branches:
+      - feature/verify-file-edits
+  workflow_dispatch:
+
+jobs:
+  chrome-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Check TypeScript
+        run: bun run compile
+      - name: Build Chrome extension
+        run: bun run build:chrome
+      - name: Package Chrome extension
+        run: |
+          test -f build/chrome-mv3/manifest.json
+          (cd build/chrome-mv3 && zip -q -r "$GITHUB_WORKSPACE/page-assist-chrome-verified.zip" .)
+      - name: Upload Chrome extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: page-assist-chrome-verified
+          path: page-assist-chrome-verified.zip
+          if-no-files-found: error
