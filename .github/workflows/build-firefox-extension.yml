@@ -1,0 +1,42 @@
+name: Build Firefox extension (Ollama MCP fix)
+on:
+  push:
+    branches:
+      - fix/ollama-final-tool-calls
+  workflow_dispatch:
+
+jobs:
+  firefox-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Check TypeScript
+        run: bun run compile
+      - name: Build Firefox extension
+        run: bun run build:firefox
+      - name: Locate Firefox build
+        run: find build -maxdepth 3 -name manifest.json -print
+      - name: Package Firefox XPI for temporary loading
+        run: |
+          set -eu
+          if [ -f build/firefox-mv2/manifest.json ]; then
+            dir=build/firefox-mv2
+          elif [ -f build/firefox-mv3/manifest.json ]; then
+            dir=build/firefox-mv3
+          else
+            echo "Firefox manifest.json not found" >&2
+            exit 1
+          fi
+          (cd "$dir" && zip -q -r "$GITHUB_WORKSPACE/page-assist-firefox-unsigned.xpi" .)
+          unzip -p page-assist-firefox-unsigned.xpi manifest.json | head -c 300
+      - name: Upload unsigned Firefox extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: page-assist-firefox-unsigned
+          path: page-assist-firefox-unsigned.xpi
+          if-no-files-found: error
