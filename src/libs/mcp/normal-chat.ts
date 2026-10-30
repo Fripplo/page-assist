@@ -812,7 +812,7 @@ export const runMcpNormalChatMode = async (
           }
 
           const result = await tool.invoke(toolCall, { signal })
-          const toolMessage =
+          let toolMessage =
             result instanceof ToolMessage
               ? result
               : new ToolMessage({
@@ -820,6 +820,53 @@ export const runMcpNormalChatMode = async (
                 tool_call_id: toolCall.id,
                 status: "success"
               })
+
+          // Verify each successful Open Terminal file edit immediately by reading
+          // the saved file back from disk. Feed the read-back result into the
+          // same tool response so the model can review it before continuing.
+          const fileEditTools = new Set(["write_file", "replace_file_content"])
+          if (
+            toolMessage.status !== "error" &&
+            parsedTool.serverName &&
+            fileEditTools.has(parsedTool.displayName) &&
+            typeof toolCall.args?.path === "string"
+          ) {
+            const readToolName = toolCall.name.replace(
+              /(?:write_file|replace_file_content)$/,
+              "read_file"
+            )
+            const readTool = tools.find((candidate) => candidate.name === readToolName)
+            let verification: string
+            if (!readTool) {
+              verification = "VERIFICATION NOT RUN: read_file tool is not available. Do not claim the file was verified."
+            } else {
+              try {
+                const readResult = await readTool.invoke(
+                  {
+                    name: readTool.name,
+                    args: { path: toolCall.args.path },
+                    id: crypto.randomUUID(),
+                    type: "tool_call"
+                  },
+                  { signal }
+                )
+                const readContent = normalizeToolContent(
+                  readResult instanceof ToolMessage ? readResult.content : readResult
+                )
+                verification = `READ-BACK of ${toolCall.args.path} after the edit (inspect for errors; syntax and runtime behavior are NOT automatically validated):\n${readContent.slice(0, 120000)}`
+                if (readContent.length > 120000) {
+                  verification += "\nTRUNCATED: file is too long for full review. Verification incomplete."
+                }
+              } catch (readError) {
+                verification = `VERIFICATION FAILED: Could not read back ${toolCall.args.path}: ${getMcpErrorMessage(readError)}. Do not claim the file was verified.`
+              }
+            }
+            toolMessage = new ToolMessage({
+              content: `${normalizeToolContent(toolMessage.content)}\n\n--- POST-EDIT FILE VERIFICATION ---\n${verification}\n--- END VERIFICATION ---\nReview the read-back file for correctness; fix errors before reporting completion. For code, run relevant syntax checks/tests with explicit approval when possible. Never claim unrun checks passed.`,
+              tool_call_id: toolCall.id,
+              status: "success"
+            })
+          }
 
           toolMessages.push(toolMessage)
 
